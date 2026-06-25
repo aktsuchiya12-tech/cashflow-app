@@ -225,9 +225,9 @@
 </head>
 <body>
 
-<div id="loading">読み込み中…</div>
+<div id="loading" style="position:fixed;inset:0;background:#111b2e;display:flex;align-items:center;justify-content:center;z-index:999;color:#8899bb;font-size:16px;">読み込み中…</div>
 
-<div id="app" class="hidden">
+<div id="app">
   <!-- HEADER -->
   <div class="header">
     <div class="header-inner">
@@ -414,8 +414,8 @@ window.addEventListener('DOMContentLoaded', () => {
     btn.classList.add('saved');
   }
   renderInput();
-  document.getElementById('loading').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
 });
 
 // --- Tab ---

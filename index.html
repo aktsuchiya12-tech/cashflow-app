@@ -14,8 +14,126 @@
   <meta name="theme-color" content="#111b2e" />
   <link rel="manifest" href="manifest.json" />
 
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Chart.js inline to avoid CDN issues -->
+  <script>
+  // Minimal chart renderer using Canvas API directly (no external dependency)
+  window.MiniChart = {
+    bar(canvasId, labels, values, colors) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const W = canvas.offsetWidth || 320;
+      const H = 180;
+      canvas.width = W * devicePixelRatio;
+      canvas.height = H * devicePixelRatio;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      const pad = { top: 16, right: 12, bottom: 32, left: 48 };
+      const cw = W - pad.left - pad.right;
+      const ch = H - pad.top - pad.bottom;
+      ctx.clearRect(0, 0, W, H);
+      const max = Math.max(...values.map(Math.abs), 1);
+      const min = Math.min(...values, 0);
+      const range = Math.max(max, Math.abs(min)) * 2.2;
+      const zeroY = pad.top + ch * (max / (max - min + 0.001) || 0.5);
+      const safeZeroY = Math.max(pad.top, Math.min(pad.top + ch, isFinite(zeroY) ? zeroY : pad.top + ch / 2));
+      // Grid
+      ctx.strokeStyle = '#2a3a5a'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + ch * i / 4;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
+        const val = max - (max - min) * i / 4;
+        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText((Math.abs(val) >= 10000 ? (val/10000).toFixed(0)+'万' : val.toFixed(0)), pad.left - 4, y + 3);
+      }
+      // Zero line
+      ctx.strokeStyle = '#C9A84C'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(pad.left, safeZeroY); ctx.lineTo(pad.left + cw, safeZeroY); ctx.stroke();
+      ctx.setLineDash([]);
+      // Bars
+      const bw = Math.max(4, cw / labels.length * 0.6);
+      const step = cw / labels.length;
+      values.forEach((v, i) => {
+        const x = pad.left + step * i + step / 2;
+        const barH = Math.abs(v) / (max - min + 0.001) * ch;
+        const y = v >= 0 ? safeZeroY - barH : safeZeroY;
+        ctx.fillStyle = colors[i] || '#C9A84C';
+        const r = 3;
+        ctx.beginPath();
+        ctx.roundRect(x - bw/2, y, bw, Math.max(2, barH), v >= 0 ? [r,r,0,0] : [0,0,r,r]);
+        ctx.fill();
+        // Label
+        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(labels[i], x, H - pad.bottom + 14);
+        // Tooltip value on hover handled separately
+      });
+    },
+    line(canvasId, labels, datasets) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const W = canvas.offsetWidth || 320;
+      const H = 180;
+      canvas.width = W * devicePixelRatio;
+      canvas.height = H * devicePixelRatio;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      const pad = { top: 16, right: 12, bottom: 32, left: 48 };
+      const cw = W - pad.left - pad.right;
+      const ch = H - pad.top - pad.bottom;
+      ctx.clearRect(0, 0, W, H);
+      const allVals = datasets.flatMap(d => d.data);
+      const max = Math.max(...allVals, 1);
+      const min = Math.min(...allVals, 0);
+      const range = max - min || 1;
+      // Grid
+      ctx.strokeStyle = '#2a3a5a'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + ch * i / 4;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
+        const val = max - range * i / 4;
+        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText((Math.abs(val) >= 10000 ? (val/10000).toFixed(0)+'万' : val.toFixed(0)), pad.left - 4, y + 3);
+      }
+      // Lines
+      const step = cw / Math.max(labels.length - 1, 1);
+      datasets.forEach(ds => {
+        ctx.strokeStyle = ds.color; ctx.lineWidth = 2; ctx.setLineDash([]);
+        ctx.beginPath();
+        ds.data.forEach((v, i) => {
+          const x = pad.left + step * i;
+          const y = pad.top + ch * (1 - (v - min) / range);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        // Dots
+        ds.data.forEach((v, i) => {
+          const x = pad.left + step * i;
+          const y = pad.top + ch * (1 - (v - min) / range);
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2);
+          ctx.fillStyle = ds.color; ctx.fill();
+        });
+      });
+      // Labels
+      ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      labels.forEach((l, i) => {
+        const x = pad.left + step * i;
+        ctx.fillText(l, x, H - pad.bottom + 14);
+      });
+      // Legend
+      let lx = pad.left;
+      datasets.forEach(ds => {
+        ctx.fillStyle = ds.color;
+        ctx.fillRect(lx, 4, 12, 8);
+        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(ds.label, lx + 16, 12);
+        lx += ctx.measureText(ds.label).width + 32;
+      });
+    }
+  };
+  </script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -424,17 +542,22 @@ function saveCarryoverData(val) {
 
 // --- Init ---
 window.addEventListener('DOMContentLoaded', () => {
-  allData = loadData();
-  carryover = loadCarryover();
-  document.getElementById('f-carryover').value = carryover || '';
-  if (carryover) {
-    const btn = document.getElementById('carryover-save-btn');
-    btn.textContent = '✓ 保存済み';
-    btn.classList.add('saved');
+  try {
+    allData = loadData();
+    carryover = loadCarryover();
+    document.getElementById('f-carryover').value = carryover || '';
+    if (carryover) {
+      const btn = document.getElementById('carryover-save-btn');
+      btn.textContent = '✓ 保存済み';
+      btn.classList.add('saved');
+    }
+    renderInput();
+  } catch(e) {
+    console.error('init error:', e);
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
   }
-  renderInput();
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
 });
 
 // --- Tab ---
@@ -564,43 +687,28 @@ function renderGraph() {
   }
 
   const labels = data.map(d => d.label);
-  const chartOpts = {
-    responsive: true,
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmt(ctx.raw) + '円' } } },
-    scales: {
-      x: { ticks: { color: '#8899bb', font: { size: 11 } }, grid: { color: '#2a3a5a' } },
-      y: { ticks: { color: '#8899bb', font: { size: 11 }, callback: v => (v/10000).toFixed(0) + '万' }, grid: { color: '#2a3a5a' } }
-    }
-  };
 
   // Bar chart – savings
-  if (chartSavings) chartSavings.destroy();
-  chartSavings = new Chart(document.getElementById('chart-savings'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        data: data.map(d => d.bal),
-        backgroundColor: data.map(d => d.bal >= 0 ? '#C9A84C' : '#ff7a7a'),
-        borderRadius: 4,
-      }]
-    },
-    options: { ...chartOpts, plugins: { ...chartOpts.plugins, tooltip: { callbacks: { label: ctx => (ctx.raw >= 0 ? '+' : '−') + fmt(ctx.raw) + '円' } } } }
-  });
+  if (chartSavings) { chartSavings = null; }
+  MiniChart.bar(
+    'chart-savings',
+    data.map(d => d.label),
+    data.map(d => d.bal),
+    data.map(d => d.bal >= 0 ? '#C9A84C' : '#ff7a7a')
+  );
+  chartSavings = true;
 
   // Line chart – trend
-  if (chartTrend) chartTrend.destroy();
-  chartTrend = new Chart(document.getElementById('chart-trend'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: '収入', data: data.map(d => d.inc), borderColor: '#5da8ff', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#5da8ff' },
-        { label: '支出', data: data.map(d => d.exp), borderColor: '#ff7a7a', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#ff7a7a' }
-      ]
-    },
-    options: { ...chartOpts, plugins: { legend: { display: true, labels: { color: '#8899bb', boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmt(ctx.raw) + '円' } } } }
-  });
+  if (chartTrend) { chartTrend = null; }
+  MiniChart.line(
+    'chart-trend',
+    data.map(d => d.label),
+    [
+      { label: '収入', data: data.map(d => d.inc), color: '#5da8ff' },
+      { label: '支出', data: data.map(d => d.exp), color: '#ff7a7a' }
+    ]
+  );
+  chartTrend = true;
 
   // Summary table
   const tbody = document.getElementById('summary-tbody');

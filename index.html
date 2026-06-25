@@ -1,756 +1,468 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>月次収支メモ</title>
-  <meta name="description" content="毎月の収入・支出・貯金を記録するシンプルな家計メモ" />
-
-  <!-- PWA -->
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="収支メモ" />
-  <meta name="theme-color" content="#111b2e" />
-  <link rel="manifest" href="manifest.json" />
-
-  <!-- Chart.js inline to avoid CDN issues -->
-  <script>
-  // Minimal chart renderer using Canvas API directly (no external dependency)
-  window.MiniChart = {
-    bar(canvasId, labels, values, colors) {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      const W = canvas.offsetWidth || 320;
-      const H = 180;
-      canvas.width = W * devicePixelRatio;
-      canvas.height = H * devicePixelRatio;
-      canvas.style.width = W + 'px';
-      canvas.style.height = H + 'px';
-      ctx.scale(devicePixelRatio, devicePixelRatio);
-      const pad = { top: 16, right: 12, bottom: 32, left: 48 };
-      const cw = W - pad.left - pad.right;
-      const ch = H - pad.top - pad.bottom;
-      ctx.clearRect(0, 0, W, H);
-      const max = Math.max(...values.map(Math.abs), 1);
-      const min = Math.min(...values, 0);
-      const range = Math.max(max, Math.abs(min)) * 2.2;
-      const zeroY = pad.top + ch * (max / (max - min + 0.001) || 0.5);
-      const safeZeroY = Math.max(pad.top, Math.min(pad.top + ch, isFinite(zeroY) ? zeroY : pad.top + ch / 2));
-      // Grid
-      ctx.strokeStyle = '#2a3a5a'; ctx.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = pad.top + ch * i / 4;
-        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
-        const val = max - (max - min) * i / 4;
-        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
-        ctx.fillText((Math.abs(val) >= 10000 ? (val/10000).toFixed(0)+'万' : val.toFixed(0)), pad.left - 4, y + 3);
-      }
-      // Zero line
-      ctx.strokeStyle = '#C9A84C'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
-      ctx.beginPath(); ctx.moveTo(pad.left, safeZeroY); ctx.lineTo(pad.left + cw, safeZeroY); ctx.stroke();
-      ctx.setLineDash([]);
-      // Bars
-      const bw = Math.max(4, cw / labels.length * 0.6);
-      const step = cw / labels.length;
-      values.forEach((v, i) => {
-        const x = pad.left + step * i + step / 2;
-        const barH = Math.abs(v) / (max - min + 0.001) * ch;
-        const y = v >= 0 ? safeZeroY - barH : safeZeroY;
-        ctx.fillStyle = colors[i] || '#C9A84C';
-        const r = 3;
-        ctx.beginPath();
-        ctx.roundRect(x - bw/2, y, bw, Math.max(2, barH), v >= 0 ? [r,r,0,0] : [0,0,r,r]);
-        ctx.fill();
-        // Label
-        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText(labels[i], x, H - pad.bottom + 14);
-        // Tooltip value on hover handled separately
-      });
-    },
-    line(canvasId, labels, datasets) {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      const W = canvas.offsetWidth || 320;
-      const H = 180;
-      canvas.width = W * devicePixelRatio;
-      canvas.height = H * devicePixelRatio;
-      canvas.style.width = W + 'px';
-      canvas.style.height = H + 'px';
-      ctx.scale(devicePixelRatio, devicePixelRatio);
-      const pad = { top: 16, right: 12, bottom: 32, left: 48 };
-      const cw = W - pad.left - pad.right;
-      const ch = H - pad.top - pad.bottom;
-      ctx.clearRect(0, 0, W, H);
-      const allVals = datasets.flatMap(d => d.data);
-      const max = Math.max(...allVals, 1);
-      const min = Math.min(...allVals, 0);
-      const range = max - min || 1;
-      // Grid
-      ctx.strokeStyle = '#2a3a5a'; ctx.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = pad.top + ch * i / 4;
-        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
-        const val = max - range * i / 4;
-        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
-        ctx.fillText((Math.abs(val) >= 10000 ? (val/10000).toFixed(0)+'万' : val.toFixed(0)), pad.left - 4, y + 3);
-      }
-      // Lines
-      const step = cw / Math.max(labels.length - 1, 1);
-      datasets.forEach(ds => {
-        ctx.strokeStyle = ds.color; ctx.lineWidth = 2; ctx.setLineDash([]);
-        ctx.beginPath();
-        ds.data.forEach((v, i) => {
-          const x = pad.left + step * i;
-          const y = pad.top + ch * (1 - (v - min) / range);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        // Dots
-        ds.data.forEach((v, i) => {
-          const x = pad.left + step * i;
-          const y = pad.top + ch * (1 - (v - min) / range);
-          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2);
-          ctx.fillStyle = ds.color; ctx.fill();
-        });
-      });
-      // Labels
-      ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      labels.forEach((l, i) => {
-        const x = pad.left + step * i;
-        ctx.fillText(l, x, H - pad.bottom + 14);
-      });
-      // Legend
-      let lx = pad.left;
-      datasets.forEach(ds => {
-        ctx.fillStyle = ds.color;
-        ctx.fillRect(lx, 4, 12, 8);
-        ctx.fillStyle = '#8899bb'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
-        ctx.fillText(ds.label, lx + 16, 12);
-        lx += ctx.measureText(ds.label).width + 32;
-      });
-    }
-  };
-  </script>
-
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #111b2e;
-      --surface: #162038;
-      --border: #2a3a5a;
-      --text: #e0e8f8;
-      --muted: #8899bb;
-      --accent: #C9A84C;
-      --blue: #5da8ff;
-      --red: #ff7a7a;
-      --safe-top: env(safe-area-inset-top, 0px);
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
-      min-height: 100vh;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    /* HEADER */
-    .header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      padding-top: var(--safe-top);
-    }
-    .header-inner {
-      max-width: 480px;
-      margin: 0 auto;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .03em; }
-
-    .tabs { display: flex; gap: 4px; background: #0e1726; border-radius: 8px; padding: 3px; }
-    .tab {
-      padding: 5px 12px;
-      border: none;
-      background: transparent;
-      color: var(--muted);
-      font-size: 13px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .tab.active { background: var(--surface); color: var(--accent); font-weight: 700; }
-
-    /* CONTENT */
-    .content {
-      max-width: 480px;
-      margin: 0 auto;
-      padding: 16px 16px calc(40px + var(--safe-bottom));
-    }
-
-    /* MONTH NAV */
-    .month-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .nav-btn {
-      width: 40px; height: 40px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--surface);
-      color: var(--muted);
-      font-size: 22px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .month-label { text-align: center; }
-    .year-text { display: block; font-size: 12px; color: var(--muted); }
-    .month-text { display: block; font-size: 24px; font-weight: 700; }
-
-    /* HERO CARD */
-    .hero-card {
-      border-radius: 16px;
-      padding: 28px 24px;
-      margin-bottom: 20px;
-      text-align: center;
-      box-shadow: 0 4px 24px rgba(0,0,0,.4);
-      background: linear-gradient(135deg,#1B2A4A 60%,#243660);
-    }
-    .hero-card.negative { background: linear-gradient(135deg,#3a1a1a 60%,#5a2222); }
-    .hero-label { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
-    .hero-amount { font-size: 36px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-bottom: 10px; color: var(--accent); }
-    .hero-card.negative .hero-amount { color: var(--red); }
-    .hero-sub { font-size: 12px; color: var(--muted); }
-    .hero-sub span + span::before { content: " − "; opacity: .5; }
-
-    /* SECTION */
-    .section {
-      background: var(--surface);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 12px;
-      border: 1px solid var(--border);
-    }
-    .section-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 12px; }
-    .input-row { margin-bottom: 12px; }
-    .input-row:last-child { margin-bottom: 0; }
-    .field-label { display: block; font-size: 13px; color: #aab8d4; margin-bottom: 6px; }
-    .input-wrap { display: flex; align-items: center; gap: 8px; }
-    input[type=number], textarea {
-      flex: 1;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: var(--text);
-      font-size: 16px;
-      font-variant-numeric: tabular-nums;
-      outline: none;
-      -webkit-appearance: none;
-      font-family: inherit;
-    }
-    input[type=number]:focus, textarea:focus { border-color: var(--accent); }
-    .unit { color: var(--muted); font-size: 14px; white-space: nowrap; }
-    textarea { resize: vertical; min-height: 72px; width: 100%; }
-
-    /* SAVE BTN */
-    .save-btn {
-      width: 100%;
-      padding: 14px;
-      background: var(--accent);
-      color: #111b2e;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      letter-spacing: .04em;
-      font-family: inherit;
-      margin-top: 4px;
-    }
-    .save-btn.saved { background: #3a6a3a; color: #b8f0b8; }
-
-    /* GRAPH */
-    .graph-card {
-      background: var(--surface);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-      border: 1px solid var(--border);
-    }
-    .graph-title { font-size: 13px; color: var(--muted); font-weight: 700; margin-bottom: 12px; letter-spacing: .06em; }
-    canvas { max-width: 100%; }
-
-    /* TABLE */
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { padding: 6px 8px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; border-bottom: 1px solid var(--border); text-align: left; }
-    th.right, td.right { text-align: right; }
-    td { padding: 8px; color: var(--text); font-variant-numeric: tabular-nums; }
-    tr:nth-child(even) { background: #1a2a42; }
-    td.income-col { color: var(--blue); }
-    td.expense-col { color: var(--red); }
-    td.balance-pos { color: var(--accent); font-weight: 700; }
-    td.balance-neg { color: var(--red); font-weight: 700; }
-
-    /* EMPTY */
-    .empty { text-align: center; padding: 60px 20px; }
-    .empty-icon { font-size: 48px; margin-bottom: 16px; }
-    .empty-text { color: var(--muted); font-size: 14px; line-height: 1.8; }
-
-    /* HIDDEN */
-    .hidden { display: none; }
-
-    /* CARRYOVER */
-    .carryover-section {
-      background: linear-gradient(135deg, #1a2a1a, #1e3a1e);
-      border: 1px solid #3a6a3a;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    .carryover-section .section-label { color: #7abf7a; }
-    .carryover-hint { font-size: 11px; color: #7abf7a; opacity: .8; margin-top: 6px; line-height: 1.6; }
-    .carryover-save-btn {
-      margin-top: 10px;
-      width: 100%;
-      padding: 9px;
-      background: #3a6a3a;
-      color: #b8f0b8;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .carryover-save-btn.saved { background: #2a4a2a; opacity: .7; }
-
-    /* EXPORT */
-    .export-btn {
-      width: 100%;
-      padding: 12px;
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      font-family: inherit;
-      margin-bottom: 16px;
-      letter-spacing: .04em;
-    }
-    .export-btn:active { background: var(--surface); }
-
-    /* LOADING */
-    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: var(--muted); font-size: 16px; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="収支メモ">
+<meta name="theme-color" content="#111b2e">
+<title>月次収支メモ</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#111b2e;color:#e0e8f8;font-family:-apple-system,sans-serif;min-height:100vh}
+.header{background:#162038;border-bottom:1px solid #2a3a5a;position:sticky;top:0;z-index:100;padding-top:env(safe-area-inset-top,0px)}
+.header-inner{max-width:480px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-size:15px;font-weight:700;color:#C9A84C}
+.tabs{display:flex;gap:4px;background:#0e1726;border-radius:8px;padding:3px}
+.tab{padding:5px 12px;border:none;background:transparent;color:#8899bb;font-size:13px;border-radius:6px;cursor:pointer;font-family:inherit}
+.tab.active{background:#162038;color:#C9A84C;font-weight:700}
+.content{max-width:480px;margin:0 auto;padding:16px 16px 60px}
+.month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.nav-btn{width:40px;height:40px;border:1px solid #2a3a5a;border-radius:8px;background:#162038;color:#8899bb;font-size:22px;cursor:pointer}
+.month-label{text-align:center}
+.year-text{display:block;font-size:12px;color:#8899bb}
+.month-text{display:block;font-size:24px;font-weight:700}
+.hero{border-radius:16px;padding:24px;margin-bottom:16px;text-align:center;background:linear-gradient(135deg,#1B2A4A,#243660)}
+.hero.neg{background:linear-gradient(135deg,#3a1a1a,#5a2222)}
+.hero-label{font-size:11px;color:#8899bb;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+.hero-amount{font-size:36px;font-weight:800;color:#C9A84C;margin-bottom:8px}
+.hero.neg .hero-amount{color:#ff8a8a}
+.hero-sub{font-size:12px;color:#8899bb}
+.section{background:#162038;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #2a3a5a}
+.sec-label{font-size:11px;color:#8899bb;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
+.row{margin-bottom:10px}
+.row:last-child{margin-bottom:0}
+.field-label{display:block;font-size:13px;color:#aab8d4;margin-bottom:5px}
+.input-wrap{display:flex;align-items:center;gap:8px}
+input[type=number],textarea{flex:1;background:#111b2e;border:1px solid #2a3a5a;border-radius:8px;padding:10px 12px;color:#e0e8f8;font-size:16px;outline:none;-webkit-appearance:none;font-family:inherit}
+input[type=number]:focus,textarea:focus{border-color:#C9A84C}
+.unit{color:#8899bb;font-size:14px;white-space:nowrap}
+textarea{width:100%;resize:vertical;min-height:64px}
+.save-btn{width:100%;padding:14px;background:#C9A84C;color:#111b2e;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px}
+.save-btn.ok{background:#3a6a3a;color:#b8f0b8}
+.carryover-sec{background:linear-gradient(135deg,#1a2a1a,#1e3a1e);border:1px solid #3a6a3a;border-radius:12px;padding:16px;margin-bottom:12px}
+.carryover-sec .sec-label{color:#7abf7a}
+.carryover-hint{font-size:11px;color:#7abf7a;margin-top:6px;line-height:1.6}
+.co-btn{width:100%;margin-top:10px;padding:9px;background:#3a6a3a;color:#b8f0b8;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.co-btn.ok{background:#2a4a2a;opacity:.8}
+.hidden{display:none}
+/* graph tab */
+.graph-hero{border-radius:16px;padding:24px;margin-bottom:16px;text-align:center;background:linear-gradient(135deg,#1B2A4A,#243660)}
+.graph-hero.neg{background:linear-gradient(135deg,#3a1a1a,#5a2222)}
+.graph-card{background:#162038;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #2a3a5a}
+.graph-title{font-size:13px;color:#8899bb;font-weight:700;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{padding:6px 8px;color:#8899bb;font-size:11px;font-weight:700;text-transform:uppercase;border-bottom:1px solid #2a3a5a;text-align:left}
+th.r,td.r{text-align:right}
+td{padding:8px;color:#e0e8f8;font-variant-numeric:tabular-nums}
+tr:nth-child(even){background:#1a2a42}
+td.inc{color:#5da8ff}
+td.exp{color:#ff7a7a}
+td.pos{color:#C9A84C;font-weight:700}
+td.neg2{color:#ff8a8a;font-weight:700}
+.export-btn{width:100%;padding:12px;background:transparent;color:#8899bb;border:1px solid #2a3a5a;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:16px}
+canvas{width:100%;display:block}
+.legend{display:flex;gap:16px;margin-bottom:8px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#8899bb}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+.empty{text-align:center;padding:60px 20px;color:#8899bb;font-size:14px;line-height:1.8}
+</style>
 </head>
 <body>
 
-<div id="loading" style="position:fixed;inset:0;background:#111b2e;display:flex;align-items:center;justify-content:center;z-index:999;color:#8899bb;font-size:16px;">読み込み中…</div>
-
-<div id="app">
-  <!-- HEADER -->
-  <div class="header">
-    <div class="header-inner">
-      <span class="logo">💰 月次収支メモ</span>
-      <div class="tabs">
-        <button class="tab active" id="tab-input" onclick="switchTab('input')">入力</button>
-        <button class="tab" id="tab-graph" onclick="switchTab('graph')">推移グラフ</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- INPUT VIEW -->
-  <div id="view-input" class="content">
-    <div class="month-nav">
-      <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
-      <div class="month-label">
-        <span class="year-text" id="disp-year"></span>
-        <span class="month-text" id="disp-month"></span>
-      </div>
-      <button class="nav-btn" onclick="changeMonth(1)">›</button>
-    </div>
-
-    <div class="hero-card" id="hero-card">
-      <div class="hero-label">今月の手元に残るお金</div>
-      <div class="hero-amount" id="hero-amount">+0 円</div>
-      <div class="hero-sub">
-        <span id="hero-income">収入 0円</span>
-        <span id="hero-expense">支出 0円</span>
-      </div>
-    </div>
-
-    <div class="carryover-section">
-      <div class="section-label">🏦 繰越残高（初回のみ）</div>
-      <div class="input-row">
-        <label class="field-label">アプリを使い始める前の貯蓄額</label>
-        <div class="input-wrap">
-          <input type="number" id="f-carryover" placeholder="0" oninput="onCarryoverInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-      <div class="carryover-hint">💡 最初に一度だけ入力してください。累計貯金の表示に加算されます。</div>
-      <button class="carryover-save-btn" id="carryover-save-btn" onclick="saveCarryover()">繰越残高を保存</button>
-    </div>
-
-    <div class="section">
-      <div class="section-label">📥 収入</div>
-      <div class="input-row">
-        <label class="field-label">手取り給与・その他</label>
-        <div class="input-wrap">
-          <input type="number" id="f-income" placeholder="0" oninput="onInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-      <div class="input-row">
-        <label class="field-label">養育費</label>
-        <div class="input-wrap">
-          <input type="number" id="f-childSupport" placeholder="0" oninput="onInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-label">📤 支出</div>
-      <div class="input-row">
-        <label class="field-label">クレジットカード請求額</label>
-        <div class="input-wrap">
-          <input type="number" id="f-creditCard" placeholder="0" oninput="onInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-      <div class="input-row">
-        <label class="field-label">銀行からの現金引出し</label>
-        <div class="input-wrap">
-          <input type="number" id="f-cashWithdrawal" placeholder="0" oninput="onInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-      <div class="input-row">
-        <label class="field-label">その他支出（任意）</label>
-        <div class="input-wrap">
-          <input type="number" id="f-otherExpenses" placeholder="0" oninput="onInput()" />
-          <span class="unit">円</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-label">📝 メモ（任意）</div>
-      <textarea id="f-note" placeholder="特別出費や気になることなど…"></textarea>
-    </div>
-
-    <button class="save-btn" id="save-btn" onclick="saveMonth()">この月のデータを保存</button>
-  </div>
-
-  <!-- GRAPH VIEW -->
-  <div id="view-graph" class="content hidden">
-    <div id="graph-empty" class="empty hidden">
-      <div class="empty-icon">📊</div>
-      <div class="empty-text">データがまだありません。<br />「入力」タブから各月を登録してください。</div>
-    </div>
-
-    <div id="graph-content" class="hidden">
-      <!-- Total savings hero -->
-      <div class="hero-card" id="total-hero">
-        <div class="hero-label">貯金できた金額の累計</div>
-        <div class="hero-amount" id="total-amount">+0 円</div>
-        <div class="hero-sub" id="total-months">記録した 0 ヶ月分の合計</div>
-        <div id="total-carryover-row" class="hero-sub" style="margin-top:6px; display:none;">
-          <span id="total-carryover-label" style="color:#7abf7a;">繰越 0円 含む</span>
-        </div>
-      </div>
-
-      <div class="graph-card">
-        <div class="graph-title">月別 貯金できた金額</div>
-        <canvas id="chart-savings" height="180"></canvas>
-      </div>
-
-      <div class="graph-card">
-        <div class="graph-title">収入・支出の推移</div>
-        <canvas id="chart-trend" height="180"></canvas>
-      </div>
-
-      <div class="graph-card">
-        <div class="graph-title">月別サマリー</div>
-        <table>
-          <thead>
-            <tr>
-              <th>月</th>
-              <th class="right">収入</th>
-              <th class="right">支出</th>
-              <th class="right">残高</th>
-            </tr>
-          </thead>
-          <tbody id="summary-tbody"></tbody>
-        </table>
-      </div>
-
-      <button class="export-btn" onclick="exportCSV()">📥 CSVでエクスポート</button>
+<div class="header">
+  <div class="header-inner">
+    <span class="logo">💰 月次収支メモ</span>
+    <div class="tabs">
+      <button class="tab active" id="tab-input" onclick="switchTab('input')">入力</button>
+      <button class="tab" id="tab-graph" onclick="switchTab('graph')">推移グラフ</button>
     </div>
   </div>
 </div>
 
+<!-- INPUT VIEW -->
+<div id="view-input" class="content">
+  <div class="month-nav">
+    <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
+    <div class="month-label">
+      <span class="year-text" id="disp-year"></span>
+      <span class="month-text" id="disp-month"></span>
+    </div>
+    <button class="nav-btn" onclick="changeMonth(1)">›</button>
+  </div>
+
+  <div class="hero" id="hero">
+    <div class="hero-label">今月の手元に残るお金</div>
+    <div class="hero-amount" id="hero-amount">+0 円</div>
+    <div class="hero-sub" id="hero-sub">収入 0円 &nbsp;−&nbsp; 支出 0円</div>
+  </div>
+
+  <div class="carryover-sec">
+    <div class="sec-label">🏦 繰越残高（初回のみ）</div>
+    <div class="row">
+      <label class="field-label">アプリを使い始める前の貯蓄額</label>
+      <div class="input-wrap">
+        <input type="number" id="f-carryover" placeholder="0" oninput="onCoInput()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+    <div class="carryover-hint">💡 最初に一度だけ入力してください。累計に加算されます。</div>
+    <button class="co-btn" id="co-btn" onclick="saveCarryover()">繰越残高を保存</button>
+  </div>
+
+  <div class="section">
+    <div class="sec-label">📥 収入</div>
+    <div class="row">
+      <label class="field-label">手取り給与・その他</label>
+      <div class="input-wrap">
+        <input type="number" id="f-income" placeholder="0" oninput="updateHero()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+    <div class="row">
+      <label class="field-label">養育費</label>
+      <div class="input-wrap">
+        <input type="number" id="f-child" placeholder="0" oninput="updateHero()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-label">📤 支出</div>
+    <div class="row">
+      <label class="field-label">クレジットカード請求額</label>
+      <div class="input-wrap">
+        <input type="number" id="f-cc" placeholder="0" oninput="updateHero()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+    <div class="row">
+      <label class="field-label">銀行からの現金引出し</label>
+      <div class="input-wrap">
+        <input type="number" id="f-cash" placeholder="0" oninput="updateHero()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+    <div class="row">
+      <label class="field-label">その他支出（任意）</label>
+      <div class="input-wrap">
+        <input type="number" id="f-other" placeholder="0" oninput="updateHero()">
+        <span class="unit">円</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-label">📝 メモ（任意）</div>
+    <textarea id="f-note" placeholder="特別出費や気になることなど…"></textarea>
+  </div>
+
+  <button class="save-btn" id="save-btn" onclick="saveMonth()">この月のデータを保存</button>
+</div>
+
+<!-- GRAPH VIEW -->
+<div id="view-graph" class="content hidden">
+  <div id="g-empty" class="empty hidden">
+    📊<br><br>データがまだありません。<br>「入力」タブから各月を登録してください。
+  </div>
+  <div id="g-content" class="hidden">
+    <div class="graph-hero" id="g-hero">
+      <div class="hero-label">貯金できた金額の累計</div>
+      <div class="hero-amount" id="g-total">+0 円</div>
+      <div class="hero-sub" id="g-months">記録した 0 ヶ月分の合計</div>
+      <div class="hero-sub" id="g-carryover-row" style="margin-top:6px;color:#7abf7a;display:none"></div>
+    </div>
+    <div class="graph-card">
+      <div class="graph-title">月別 貯金できた金額</div>
+      <canvas id="c-savings" height="160"></canvas>
+    </div>
+    <div class="graph-card">
+      <div class="graph-title">収入・支出の推移</div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#5da8ff"></div>収入</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff7a7a"></div>支出</div>
+      </div>
+      <canvas id="c-trend" height="160"></canvas>
+    </div>
+    <div class="graph-card">
+      <div class="graph-title">月別サマリー</div>
+      <table>
+        <thead><tr><th>月</th><th class="r">収入</th><th class="r">支出</th><th class="r">残高</th></tr></thead>
+        <tbody id="g-tbody"></tbody>
+      </table>
+    </div>
+    <button class="export-btn" onclick="exportCSV()">📥 CSVでエクスポート</button>
+  </div>
+</div>
+
 <script>
-const STORAGE_KEY = 'cashflow_data_v1';
-const CARRYOVER_KEY = 'cashflow_carryover_v1';
-const MONTHS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-const today = new Date();
-let currentYear = today.getFullYear();
-let currentMonth = today.getMonth();
-let allData = {};
-let carryover = 0;
-let chartSavings = null;
-let chartTrend = null;
-let currentView = 'input';
+var MONTHS=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+var now=new Date();
+var cy=now.getFullYear(), cm=now.getMonth();
+var allData={}, carryover=0;
 
-const fmt = n => Math.abs(n).toLocaleString('ja-JP');
-const toNum = v => { const n = parseInt(String(v||'').replace(/,/g,''),10); return isNaN(n)?0:n; };
-const key = (y,m) => `${y}-${m}`;
+function n(v){var x=parseInt(String(v||'').replace(/,/g,''),10);return isNaN(x)?0:x;}
+function f(v){return Math.abs(v).toLocaleString('ja-JP');}
+function k(y,m){return y+'-'+m;}
 
-// --- Storage ---
-function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-function saveData() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(allData)); } catch(e) { console.error(e); }
-}
-function loadCarryover() {
-  try { return parseInt(localStorage.getItem(CARRYOVER_KEY) || '0', 10) || 0; } catch { return 0; }
-}
-function saveCarryoverData(val) {
-  try { localStorage.setItem(CARRYOVER_KEY, String(val)); } catch(e) { console.error(e); }
+function load(){try{var r=localStorage.getItem('cf_v1');return r?JSON.parse(r):{};}catch(e){return{};}}
+function save(){try{localStorage.setItem('cf_v1',JSON.stringify(allData));}catch(e){}}
+function loadCo(){try{return parseInt(localStorage.getItem('cf_co')||'0',10)||0;}catch(e){return 0;}}
+function saveCo(v){try{localStorage.setItem('cf_co',String(v));}catch(e){}}
+
+// init
+allData=load();
+carryover=loadCo();
+document.getElementById('f-carryover').value=carryover||'';
+if(carryover){document.getElementById('co-btn').textContent='✓ 保存済み';document.getElementById('co-btn').className='co-btn ok';}
+renderInput();
+
+function switchTab(t){
+  document.getElementById('view-input').className='content'+(t==='input'?'':' hidden');
+  document.getElementById('view-graph').className='content'+(t==='graph'?'':' hidden');
+  document.getElementById('tab-input').className='tab'+(t==='input'?' active':'');
+  document.getElementById('tab-graph').className='tab'+(t==='graph'?' active':'');
+  if(t==='graph')renderGraph();
 }
 
-// --- Init ---
-window.addEventListener('DOMContentLoaded', () => {
-  try {
-    allData = loadData();
-    carryover = loadCarryover();
-    document.getElementById('f-carryover').value = carryover || '';
-    if (carryover) {
-      const btn = document.getElementById('carryover-save-btn');
-      btn.textContent = '✓ 保存済み';
-      btn.classList.add('saved');
-    }
-    renderInput();
-  } catch(e) {
-    console.error('init error:', e);
-  } finally {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-  }
-});
-
-// --- Tab ---
-function switchTab(tab) {
-  currentView = tab;
-  document.getElementById('view-input').classList.toggle('hidden', tab !== 'input');
-  document.getElementById('view-graph').classList.toggle('hidden', tab !== 'graph');
-  document.getElementById('tab-input').classList.toggle('active', tab === 'input');
-  document.getElementById('tab-graph').classList.toggle('active', tab === 'graph');
-  if (tab === 'graph') renderGraph();
-}
-
-// --- Month nav ---
-function changeMonth(delta) {
-  currentMonth += delta;
-  if (currentMonth < 0) { currentMonth = 11; currentYear--; }
-  if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+function changeMonth(d){
+  cm+=d;
+  if(cm<0){cm=11;cy--;}
+  if(cm>11){cm=0;cy++;}
   renderInput();
 }
 
-// --- Input ---
-function renderInput() {
-  document.getElementById('disp-year').textContent = currentYear + '年';
-  document.getElementById('disp-month').textContent = MONTHS[currentMonth];
-  const d = allData[key(currentYear, currentMonth)] || {};
-  ['income','childSupport','creditCard','cashWithdrawal','otherExpenses'].forEach(f => {
-    document.getElementById('f-'+f).value = d[f] || '';
-  });
-  document.getElementById('f-note').value = d.note || '';
+function renderInput(){
+  document.getElementById('disp-year').textContent=cy+'年';
+  document.getElementById('disp-month').textContent=MONTHS[cm];
+  var d=allData[k(cy,cm)]||{};
+  document.getElementById('f-income').value=d.income||'';
+  document.getElementById('f-child').value=d.child||'';
+  document.getElementById('f-cc').value=d.cc||'';
+  document.getElementById('f-cash').value=d.cash||'';
+  document.getElementById('f-other').value=d.other||'';
+  document.getElementById('f-note').value=d.note||'';
   updateHero();
-  const btn = document.getElementById('save-btn');
-  btn.textContent = 'この月のデータを保存';
-  btn.classList.remove('saved');
+  var btn=document.getElementById('save-btn');
+  btn.textContent='この月のデータを保存';
+  btn.className='save-btn';
 }
 
-function onInput() { updateHero(); }
-
-function onCarryoverInput() {
-  const btn = document.getElementById('carryover-save-btn');
-  btn.textContent = '繰越残高を保存';
-  btn.classList.remove('saved');
+function updateHero(){
+  var inc=n(document.getElementById('f-income').value)+n(document.getElementById('f-child').value);
+  var exp=n(document.getElementById('f-cc').value)+n(document.getElementById('f-cash').value)+n(document.getElementById('f-other').value);
+  var bal=inc-exp;
+  var pos=bal>=0;
+  document.getElementById('hero').className='hero'+(pos?'':' neg');
+  document.getElementById('hero-amount').textContent=(pos?'+':'−')+f(bal)+' 円';
+  document.getElementById('hero-amount').style.color=pos?'#C9A84C':'#ff8a8a';
+  document.getElementById('hero-sub').textContent='収入 '+f(inc)+'円　−　支出 '+f(exp)+'円';
 }
 
-function saveCarryover() {
-  const val = parseInt(document.getElementById('f-carryover').value || '0', 10) || 0;
-  carryover = val;
-  saveCarryoverData(val);
-  const btn = document.getElementById('carryover-save-btn');
-  btn.textContent = '✓ 保存しました';
-  btn.classList.add('saved');
+function saveMonth(){
+  allData[k(cy,cm)]={
+    income:document.getElementById('f-income').value,
+    child:document.getElementById('f-child').value,
+    cc:document.getElementById('f-cc').value,
+    cash:document.getElementById('f-cash').value,
+    other:document.getElementById('f-other').value,
+    note:document.getElementById('f-note').value
+  };
+  save();
+  var btn=document.getElementById('save-btn');
+  btn.textContent='✓ 保存しました';
+  btn.className='save-btn ok';
 }
 
-function updateHero() {
-  const inc = toNum(document.getElementById('f-income').value) + toNum(document.getElementById('f-childSupport').value);
-  const exp = toNum(document.getElementById('f-creditCard').value) + toNum(document.getElementById('f-cashWithdrawal').value) + toNum(document.getElementById('f-otherExpenses').value);
-  const bal = inc - exp;
-  const pos = bal >= 0;
-  const hero = document.getElementById('hero-card');
-  hero.classList.toggle('negative', !pos);
-  document.getElementById('hero-amount').textContent = (pos ? '+' : '−') + fmt(bal) + ' 円';
-  document.getElementById('hero-amount').style.color = pos ? '#C9A84C' : '#ff8a8a';
-  document.getElementById('hero-income').textContent = '収入 ' + fmt(inc) + '円';
-  document.getElementById('hero-expense').textContent = '支出 ' + fmt(exp) + '円';
+function onCoInput(){
+  document.getElementById('co-btn').textContent='繰越残高を保存';
+  document.getElementById('co-btn').className='co-btn';
 }
 
-function saveMonth() {
-  const d = {};
-  ['income','childSupport','creditCard','cashWithdrawal','otherExpenses'].forEach(f => {
-    d[f] = document.getElementById('f-'+f).value;
-  });
-  d.note = document.getElementById('f-note').value;
-  allData[key(currentYear, currentMonth)] = d;
-  saveData();
-  const btn = document.getElementById('save-btn');
-  btn.textContent = '✓ 保存しました';
-  btn.classList.add('saved');
+function saveCarryover(){
+  carryover=n(document.getElementById('f-carryover').value);
+  saveCo(carryover);
+  document.getElementById('co-btn').textContent='✓ 保存しました';
+  document.getElementById('co-btn').className='co-btn ok';
 }
 
-// --- Graph ---
-function getGraphData() {
-  const result = [];
-  for (let i = 11; i >= 0; i--) {
-    let m = currentMonth - i;
-    let y = currentYear;
-    while (m < 0) { m += 12; y--; }
-    const k = key(y, m);
-    const d = allData[k];
-    if (!d) continue;
-    const inc = toNum(d.income) + toNum(d.childSupport);
-    const exp = toNum(d.creditCard) + toNum(d.cashWithdrawal) + toNum(d.otherExpenses);
-    const label = (y !== today.getFullYear() ? y + '/' : '') + MONTHS[m];
-    result.push({ label, inc, exp, bal: inc - exp });
+function getGraphData(){
+  var result=[];
+  for(var i=11;i>=0;i--){
+    var m=cm-i, y=cy;
+    while(m<0){m+=12;y--;}
+    var d=allData[k(y,m)];
+    if(!d)continue;
+    var inc=n(d.income)+n(d.child);
+    var exp=n(d.cc)+n(d.cash)+n(d.other);
+    var label=(y!==now.getFullYear()?y+'/':'')+MONTHS[m];
+    result.push({label:label,inc:inc,exp:exp,bal:inc-exp});
   }
   return result;
 }
 
-function renderGraph() {
-  const data = getGraphData();
-  const empty = document.getElementById('graph-empty');
-  const content = document.getElementById('graph-content');
+function drawBar(canvasId, labels, values, colors){
+  var canvas=document.getElementById(canvasId);
+  if(!canvas)return;
+  var W=canvas.parentElement.clientWidth-32||300;
+  var H=160;
+  var dpr=window.devicePixelRatio||1;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  var ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  var pl=44,pr=8,pt=10,pb=28;
+  var cw=W-pl-pr, ch=H-pt-pb;
+  var max=0,min=0;
+  values.forEach(function(v){if(v>max)max=v;if(v<min)min=v;});
+  if(max===0&&min===0){max=1;}
+  var range=max-min||1;
+  var zeroY=pt+ch*(max/range);
+  // grid
+  ctx.strokeStyle='#2a3a5a'; ctx.lineWidth=1;
+  for(var i=0;i<=4;i++){
+    var gy=pt+ch*i/4;
+    ctx.beginPath();ctx.moveTo(pl,gy);ctx.lineTo(pl+cw,gy);ctx.stroke();
+    var gv=max-range*i/4;
+    ctx.fillStyle='#8899bb';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillText(Math.abs(gv)>=10000?(gv/10000).toFixed(0)+'万':Math.round(gv)+'',pl-3,gy+3);
+  }
+  // zero line
+  ctx.strokeStyle='#C9A84C';ctx.lineWidth=1;
+  ctx.setLineDash([4,3]);
+  ctx.beginPath();ctx.moveTo(pl,zeroY);ctx.lineTo(pl+cw,zeroY);ctx.stroke();
+  ctx.setLineDash([]);
+  // bars
+  var step=cw/labels.length;
+  var bw=Math.max(4,step*0.55);
+  values.forEach(function(v,i){
+    var x=pl+step*i+step/2;
+    var bh=Math.abs(v)/range*ch;
+    var by=v>=0?zeroY-bh:zeroY;
+    ctx.fillStyle=colors[i]||'#C9A84C';
+    ctx.beginPath();
+    ctx.rect(x-bw/2,by,bw,Math.max(2,bh));
+    ctx.fill();
+    ctx.fillStyle='#8899bb';ctx.font='10px sans-serif';ctx.textAlign='center';
+    ctx.fillText(labels[i],x,H-pb+14);
+  });
+}
 
-  if (data.length === 0) {
-    empty.classList.remove('hidden');
-    content.classList.add('hidden');
+function drawLine(canvasId, labels, datasets){
+  var canvas=document.getElementById(canvasId);
+  if(!canvas)return;
+  var W=canvas.parentElement.clientWidth-32||300;
+  var H=160;
+  var dpr=window.devicePixelRatio||1;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  var ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  var pl=44,pr=8,pt=10,pb=28;
+  var cw=W-pl-pr, ch=H-pt-pb;
+  var allVals=[];
+  datasets.forEach(function(ds){ds.data.forEach(function(v){allVals.push(v);});});
+  var max=Math.max.apply(null,allVals.concat([1]));
+  var min=Math.min.apply(null,allVals.concat([0]));
+  var range=max-min||1;
+  // grid
+  ctx.strokeStyle='#2a3a5a';ctx.lineWidth=1;
+  for(var i=0;i<=4;i++){
+    var gy=pt+ch*i/4;
+    ctx.beginPath();ctx.moveTo(pl,gy);ctx.lineTo(pl+cw,gy);ctx.stroke();
+    var gv=max-range*i/4;
+    ctx.fillStyle='#8899bb';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillText(Math.abs(gv)>=10000?(gv/10000).toFixed(0)+'万':Math.round(gv)+'',pl-3,gy+3);
+  }
+  var step=labels.length>1?cw/(labels.length-1):cw;
+  // lines & dots
+  datasets.forEach(function(ds){
+    ctx.strokeStyle=ds.color;ctx.lineWidth=2;ctx.setLineDash([]);
+    ctx.beginPath();
+    ds.data.forEach(function(v,i){
+      var x=pl+step*i;
+      var y=pt+ch*(1-(v-min)/range);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ds.data.forEach(function(v,i){
+      var x=pl+step*i;
+      var y=pt+ch*(1-(v-min)/range);
+      ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);
+      ctx.fillStyle=ds.color;ctx.fill();
+    });
+  });
+  // labels
+  ctx.fillStyle='#8899bb';ctx.font='10px sans-serif';ctx.textAlign='center';
+  labels.forEach(function(l,i){
+    ctx.fillText(l,pl+step*i,H-pb+14);
+  });
+}
+
+function renderGraph(){
+  var data=getGraphData();
+  if(data.length===0){
+    document.getElementById('g-empty').className='empty';
+    document.getElementById('g-content').className='hidden';
     return;
   }
-  empty.classList.add('hidden');
-  content.classList.remove('hidden');
+  document.getElementById('g-empty').className='empty hidden';
+  document.getElementById('g-content').className='';
 
-  // Total savings
-  const monthlySavings = Object.values(allData).reduce((sum, d) => {
-    return sum + (toNum(d.income) + toNum(d.childSupport)) - (toNum(d.creditCard) + toNum(d.cashWithdrawal) + toNum(d.otherExpenses));
-  }, 0);
-  const totalSavings = monthlySavings + carryover;
-  const totalMonths = Object.keys(allData).length;
-  const totalPos = totalSavings >= 0;
-  document.getElementById('total-hero').classList.toggle('negative', !totalPos);
-  document.getElementById('total-amount').textContent = (totalPos ? '+' : '−') + fmt(totalSavings) + ' 円';
-  document.getElementById('total-amount').style.color = totalPos ? '#C9A84C' : '#ff8a8a';
-  document.getElementById('total-months').textContent = '記録した ' + totalMonths + ' ヶ月分の合計';
-  const carryoverRow = document.getElementById('total-carryover-row');
-  if (carryover > 0) {
-    carryoverRow.style.display = 'block';
-    document.getElementById('total-carryover-label').textContent = '繰越 ' + fmt(carryover) + '円 含む';
-  } else {
-    carryoverRow.style.display = 'none';
-  }
-
-  const labels = data.map(d => d.label);
-
-  // Bar chart – savings
-  if (chartSavings) { chartSavings = null; }
-  MiniChart.bar(
-    'chart-savings',
-    data.map(d => d.label),
-    data.map(d => d.bal),
-    data.map(d => d.bal >= 0 ? '#C9A84C' : '#ff7a7a')
-  );
-  chartSavings = true;
-
-  // Line chart – trend
-  if (chartTrend) { chartTrend = null; }
-  MiniChart.line(
-    'chart-trend',
-    data.map(d => d.label),
-    [
-      { label: '収入', data: data.map(d => d.inc), color: '#5da8ff' },
-      { label: '支出', data: data.map(d => d.exp), color: '#ff7a7a' }
-    ]
-  );
-  chartTrend = true;
-
-  // Summary table
-  const tbody = document.getElementById('summary-tbody');
-  tbody.innerHTML = data.map(d => {
-    const pos = d.bal >= 0;
-    return `<tr>
-      <td>${d.label}</td>
-      <td class="right income-col">${fmt(d.inc)}</td>
-      <td class="right expense-col">${fmt(d.exp)}</td>
-      <td class="right ${pos ? 'balance-pos' : 'balance-neg'}">${pos ? '+' : '−'}${fmt(d.bal)}</td>
-    </tr>`;
-  }).join('');
-// --- CSV Export ---
-function exportCSV() {
-  const rows = [['月', '給与・その他', '養育費', 'クレジットカード', '現金引出し', 'その他支出', '残高', 'メモ']];
-  const sorted = Object.keys(allData).sort();
-  sorted.forEach(k => {
-    const d = allData[k];
-    const [y, m] = k.split('-');
-    const label = y + '年' + MONTHS[parseInt(m)];
-    const inc = toNum(d.income);
-    const child = toNum(d.childSupport);
-    const cc = toNum(d.creditCard);
-    const cash = toNum(d.cashWithdrawal);
-    const other = toNum(d.otherExpenses);
-    const bal = inc + child - cc - cash - other;
-    rows.push([label, inc, child, cc, cash, other, bal, d.note || '']);
+  // total
+  var monthly=0;
+  Object.keys(allData).forEach(function(key){
+    var d=allData[key];
+    monthly+=(n(d.income)+n(d.child))-(n(d.cc)+n(d.cash)+n(d.other));
   });
-  if (carryover > 0) {
-    rows.push(['繰越残高', carryover, '', '', '', '', '', '']);
-  }
-  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const bom = '\uFEFF'; // UTF-8 BOM（Excelで文字化けしないように）
-  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '収支メモ_' + new Date().toISOString().slice(0,10) + '.csv';
-  a.click();
+  var total=monthly+carryover;
+  var pos=total>=0;
+  document.getElementById('g-hero').className='graph-hero'+(pos?'':' neg');
+  document.getElementById('g-total').textContent=(pos?'+':'−')+f(total)+' 円';
+  document.getElementById('g-total').style.color=pos?'#C9A84C':'#ff8a8a';
+  document.getElementById('g-months').textContent='記録した '+Object.keys(allData).length+' ヶ月分の合計';
+  var coRow=document.getElementById('g-carryover-row');
+  if(carryover>0){coRow.style.display='block';coRow.textContent='繰越 '+f(carryover)+'円 含む';}
+  else{coRow.style.display='none';}
+
+  // charts
+  var labels=data.map(function(d){return d.label;});
+  drawBar('c-savings',labels,data.map(function(d){return d.bal;}),data.map(function(d){return d.bal>=0?'#C9A84C':'#ff7a7a';}));
+  drawLine('c-trend',labels,[
+    {label:'収入',data:data.map(function(d){return d.inc;}),color:'#5da8ff'},
+    {label:'支出',data:data.map(function(d){return d.exp;}),color:'#ff7a7a'}
+  ]);
+
+  // table
+  var html='';
+  data.forEach(function(d){
+    var pos2=d.bal>=0;
+    html+='<tr><td>'+d.label+'</td><td class="r inc">'+f(d.inc)+'</td><td class="r exp">'+f(d.exp)+'</td><td class="r '+(pos2?'pos':'neg2')+'">'+(pos2?'+':'−')+f(d.bal)+'</td></tr>';
+  });
+  document.getElementById('g-tbody').innerHTML=html;
+}
+
+function exportCSV(){
+  var rows=[['月','給与・その他','養育費','クレジットカード','現金引出し','その他支出','残高','メモ']];
+  Object.keys(allData).sort().forEach(function(key){
+    var d=allData[key];
+    var parts=key.split('-');
+    var label=parts[0]+'年'+MONTHS[parseInt(parts[1])];
+    var inc=n(d.income), child=n(d.child), cc=n(d.cc), cash=n(d.cash), other=n(d.other);
+    var bal=inc+child-cc-cash-other;
+    rows.push([label,inc,child,cc,cash,other,bal,d.note||'']);
+  });
+  if(carryover>0)rows.push(['繰越残高',carryover,'','','','','','']);
+  var csv=rows.map(function(r){return r.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+  var blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='収支メモ_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 </script>
-
 </body>
 </html>
